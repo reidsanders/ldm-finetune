@@ -48,8 +48,10 @@ def average_prompt_embed_with_aesthetic_embed(
 
 
 from encoders.modules import BERTEmbedder
-from guided_diffusion.script_util import (create_model_and_diffusion,
-                                          model_and_diffusion_defaults)
+from guided_diffusion.script_util import (
+    create_model_and_diffusion,
+    model_and_diffusion_defaults,
+)
 
 parser = argparse.ArgumentParser()
 
@@ -200,8 +202,28 @@ parser.add_argument(
 )  # turn on to use 50 step ddim
 
 parser.add_argument(
-    "--prompt_file", type=str, default="artistic_prompts.json", help="json file with list of prompts to run."
+    "--prompt_file",
+    type=str,
+    default="artistic_prompts.json",
+    help="json file with list of prompts to run.",
 )
+
+parser.add_argument(
+    "--aesthetic_rating",
+    type=int,
+    required=False,
+    default=9,
+    help="aesthetic rating to target [0,9]",
+)
+
+parser.add_argument(
+    "--aesthetic_weight",
+    type=float,
+    required=False,
+    default=0.5,
+    help="weight to put on aesthetic rating guidance",
+)
+
 
 args = parser.parse_args()
 
@@ -445,7 +467,7 @@ columns = [
 eval_table = wandb.Table(columns=columns)
 
 
-def do_run(text, prefix):
+def do_run(text, prefix, aesthetic_rating=9, aesthetic_weight=0.5):
 
     if args.seed >= 0:
         torch.manual_seed(args.seed)
@@ -460,19 +482,18 @@ def do_run(text, prefix):
     ).to(device)
 
     # clip context
-    aesthetic_rating = 9
-    aesthetic_weight = 0.5
     text_emb_clip = clip_model.encode_text(text)
     text_emb_clip_blank = clip_model.encode_text(text_clip_blank)
-    print(
-        f"Using aesthetic embedding {aesthetic_rating} with weight {aesthetic_weight}"
-    )
-    text_emb_clip_aesthetic = load_aesthetic_vit_l_14_embed(
-        aesthetic_rating
-    ).to(device)
-    text_emb_clip = average_prompt_embed_with_aesthetic_embed(
-        text_emb_clip, text_emb_clip_aesthetic, aesthetic_weight
-    )
+    if aesthetic_weight > 0:
+        print(
+            f"Using aesthetic embedding {aesthetic_rating} with weight {aesthetic_weight}"
+        )
+        text_emb_clip_aesthetic = load_aesthetic_vit_l_14_embed(aesthetic_rating).to(
+            device
+        )
+        text_emb_clip = average_prompt_embed_with_aesthetic_embed(
+            text_emb_clip, text_emb_clip_aesthetic, aesthetic_weight
+        )
 
     make_cutouts = MakeCutouts(clip_model.visual.input_resolution, args.cutn)
 
@@ -748,11 +769,17 @@ def do_run(text, prefix):
         save_sample(i, sample, args.clip_score)
     print(f"Logged prompt {prompt} to w&b table")
 
+
 if args.text:
     prompt = args.text
     print(f"Starting run for\t{prompt}")
     clean_prompt = prompt.replace(" ", "_").replace(".", "")[:80]
-    do_run(prompt, prefix=clean_prompt)
+    do_run(
+        prompt,
+        prefix=clean_prompt,
+        aesthetic_rating=args.aesthetic_rating,
+        aesthetic_weight=args.aesthetic_weight,
+    )
 
 if args.prompt_file:
     prompts = json.load(open(args.prompt_file))
@@ -760,11 +787,15 @@ if args.prompt_file:
         for prompt in prompts:
             print(f"Starting run for\t{prompt}")
             clean_prompt = prompt.replace(" ", "_").replace(".", "")[:80]
-            do_run(prompt, prefix=clean_prompt)
+            do_run(
+                prompt,
+                prefix=clean_prompt,
+                aesthetic_rating=args.aesthetic_rating,
+                aesthetic_weight=args.aesthetic_weight,
+            )
             gc.collect()
     except KeyboardInterrupt:
         print(f"Canceled, uploading partial results.")
-
 
     wandb.run.log({"artistic_prompts": eval_table})
     print(f"Done.")
