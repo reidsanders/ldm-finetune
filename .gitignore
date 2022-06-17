@@ -7,7 +7,14 @@ auto_outputs_npy/
 wandb/
 latent-diffusion/
 run_autoedit.sh.cog/
-output
+outputs/
 output_npy/
+mask.png
+artistic_prompts*.json
+aesthetic-predictor/
+models/
+prompts_emoji.json
+src/
 dist/
 guided_diffusion.egg-info/
+

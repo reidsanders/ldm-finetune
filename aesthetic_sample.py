@@ -696,15 +696,20 @@ def do_run(text, prefix, aesthetic_rating=9, aesthetic_weight=0.5):
             im = image.unsqueeze(0)
             out = ldm.decode(im)
 
+            outpath = f"{output_folder}/{prefix}"
+            outpath_npy = f"{output_folder}_npy/{prefix}"
+            Path(outpath).mkdir(parents=True, exist_ok=True)
+            Path(outpath_npy).mkdir(parents=True, exist_ok=True)
+            
             npy_filename = (
-                f"{output_folder}_npy/{prefix}{i * args.batch_size + k:05}.npy"
+                f"{outpath_npy}/{prefix}{i * args.batch_size + k:05}.npy"
             )
             with open(npy_filename, "wb") as outfile:
                 np.save(outfile, image.detach().cpu().numpy())
 
             out = TF.to_pil_image(out.squeeze(0).add(1).div(2).clamp(0, 1))
 
-            filename = f"{output_folder}/{prefix}{i * args.batch_size + k:05}.png"
+            filename = f"{outpath}/{prefix}{i * args.batch_size + k:05}.png"
             out.save(filename)
 
             if clip_score:
@@ -773,7 +778,7 @@ def do_run(text, prefix, aesthetic_rating=9, aesthetic_weight=0.5):
 if args.text:
     prompt = args.text
     print(f"Starting run for\t{prompt}")
-    clean_prompt = prompt.replace(" ", "_").replace(".", "")[:80]
+    clean_prompt = prompt.replace(" ", "_").replace(".", "")[:220]
     do_run(
         prompt,
         prefix=clean_prompt,
@@ -786,7 +791,7 @@ if args.prompt_file:
     try:
         for prompt in prompts:
             print(f"Starting run for\t{prompt}")
-            clean_prompt = prompt.replace(" ", "_").replace(".", "")[:80]
+            clean_prompt = prompt.replace(" ", "_").replace(".", "")[:220]
             do_run(
                 prompt,
                 prefix=clean_prompt,
