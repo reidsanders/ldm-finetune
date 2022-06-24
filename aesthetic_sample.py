@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from turtle import pos
 
 import clip
 import numpy as np
@@ -16,6 +17,17 @@ from torch import nn
 from torch.nn import functional as F
 from torchvision import transforms
 from torchvision.transforms import functional as TF
+
+def load_class_vit_l_14_embed(
+    target_class: str = "good", embed_dir: str = "aesthetic-predictor/vit_l_14_embeddings"
+) -> torch.Tensor:
+    assert target_class in [
+        "good",
+        "bad",
+    ], "rating must be in ['good', 'bad']"
+    embed_path = os.path.join(embed_dir, f"class_{target_class}.npy")
+    text_emb_clip_aesthetic = np.load(embed_path)
+    return torch.from_numpy(text_emb_clip_aesthetic)
 
 
 def load_aesthetic_vit_l_14_embed(
@@ -222,6 +234,38 @@ parser.add_argument(
     required=False,
     default=0.5,
     help="weight to put on aesthetic rating guidance",
+)
+
+parser.add_argument(
+    "--positive_class",
+    type=str,
+    required=False,
+    default="good",
+    help="positive target class",
+)
+
+parser.add_argument(
+    "--positive_class_weight",
+    type=float,
+    required=False,
+    default=0.5,
+    help="weight to put on positive class guidance",
+)
+
+parser.add_argument(
+    "--negative_class",
+    type=str,
+    required=False,
+    default="bad",
+    help="negative target class",
+)
+
+parser.add_argument(
+    "--negative_class_weight",
+    type=float,
+    required=False,
+    default=0.5,
+    help="weight to put on negative class guidance",
 )
 
 
@@ -467,7 +511,7 @@ columns = [
 eval_table = wandb.Table(columns=columns)
 
 
-def do_run(text, prefix, aesthetic_rating=9, aesthetic_weight=0.5):
+def do_run(text, prefix, aesthetic_rating=9, aesthetic_weight=0.5, positive_class="good", negative_class="bad", positive_class_weight=0.5, negative_class_weight=0.5):
 
     if args.seed >= 0:
         torch.manual_seed(args.seed)
@@ -489,6 +533,16 @@ def do_run(text, prefix, aesthetic_rating=9, aesthetic_weight=0.5):
             f"Using aesthetic embedding {aesthetic_rating} with weight {aesthetic_weight}"
         )
         text_emb_clip_aesthetic = load_aesthetic_vit_l_14_embed(aesthetic_rating).to(
+            device
+        )
+        text_emb_clip = average_prompt_embed_with_aesthetic_embed(
+            text_emb_clip, text_emb_clip_aesthetic, aesthetic_weight
+        )
+    if positive_class_weight > 0:
+        print(
+            f"Using class embedding {positive_class} with weight {positive_class_weight}"
+        )
+        text_emb_clip_aesthetic = load_class_vit_l_14_embed(positive_class).to(
             device
         )
         text_emb_clip = average_prompt_embed_with_aesthetic_embed(
@@ -784,6 +838,10 @@ if args.text:
         prefix=clean_prompt,
         aesthetic_rating=args.aesthetic_rating,
         aesthetic_weight=args.aesthetic_weight,
+        positive_class=args.positive_class,
+        negative_class=args.negative_class,
+        positive_class_weight=args.positive_class_weight,
+        negative_class_weight=args.negative_class_weight,
     )
 
 if args.prompt_file:
@@ -797,6 +855,10 @@ if args.prompt_file:
                 prefix=clean_prompt,
                 aesthetic_rating=args.aesthetic_rating,
                 aesthetic_weight=args.aesthetic_weight,
+                positive_class=args.positive_class,
+                negative_class=args.negative_class,
+                positive_class_weight=args.positive_class_weight,
+                negative_class_weight=args.negative_class_weight,
             )
             gc.collect()
     except KeyboardInterrupt:
