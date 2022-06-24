@@ -21,10 +21,6 @@ from torchvision.transforms import functional as TF
 def load_class_vit_l_14_embed(
     target_class: str = "good", embed_dir: str = "aesthetic-predictor/vit_l_14_embeddings"
 ) -> torch.Tensor:
-    assert target_class in [
-        "good",
-        "bad",
-    ], "rating must be in ['good', 'bad']"
     embed_path = os.path.join(embed_dir, f"class_{target_class}.npy")
     text_emb_clip_aesthetic = np.load(embed_path)
     return torch.from_numpy(text_emb_clip_aesthetic)
@@ -546,7 +542,7 @@ def do_run(text, prefix, aesthetic_rating=9, aesthetic_weight=0.5, positive_clas
             device
         )
         text_emb_clip = average_prompt_embed_with_aesthetic_embed(
-            text_emb_clip, text_emb_clip_aesthetic, aesthetic_weight
+            text_emb_clip, text_emb_clip_aesthetic, positive_class_weight
         )
 
     make_cutouts = MakeCutouts(clip_model.visual.input_resolution, args.cutn)
