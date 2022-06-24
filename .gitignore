@@ -17,4 +17,7 @@ prompts_emoji.json
 src/
 dist/
 guided_diffusion.egg-info/
-
+textual.onnx
+visual.onnx
+*.sh
+.cog/
