@@ -12,14 +12,13 @@ from torchvision.transforms import (CenterCrop, Compose, InterpolationMode,
                                     Normalize, Resize, ToTensor)
 from torchvision.transforms import functional as TF
 
-from clip_custom import clip
+from dist.clip_onnx import clip_onnx
+from dist.clip_custom import clip
 from encoders.modules import BERTEmbedder
 from guided_diffusion.script_util import (create_gaussian_diffusion,
                                           create_model_and_diffusion,
                                           model_and_diffusion_defaults)
 
-sys.path.append("CLIP-ONNX")
-from clip_onnx import clip_onnx
 # load from environment if set, otherwise use "outputs"
 BASE_DIR = Path(os.environ.get("BASE_DIR", "outputs"))
 
@@ -150,6 +149,7 @@ def load_diffusion_model(model_path: str, steps: int, use_fp16: bool, device: st
     Load a diffusion model from a checkpoint.
     """
     model_state_dict = torch.load(model_path, map_location="cpu")
+
     model_params = {
         "attention_resolutions": "32,16,8",
         "class_cond": False,
@@ -189,7 +189,6 @@ def load_diffusion_model(model_path: str, steps: int, use_fp16: bool, device: st
     model.to(device)
     return model, model_config, diffusion
 
-
 def set_requires_grad(model, value):
     """
     Set the requires_grad flag of all parameters in the model.
@@ -200,29 +199,32 @@ def set_requires_grad(model, value):
 
 # vae
 def load_vae(
-    kl_path: Path = Path("kl-f8.pt"), clip_guidance: bool = False, device: str = "cuda"
+    kl_path: Path = Path("kl-f8.pt"), clip_guidance: bool = False, device: str = "cuda", use_fp16: bool = False
 ):
     """
     Load kl-f8 stage 1 VAE from a checkpoint.
     """
-    ldm = torch.load(kl_path, map_location="cpu")
-    ldm.to(device)
-    ldm.eval()
-    ldm.requires_grad_(clip_guidance)
-    set_requires_grad(ldm, False)
-    return ldm
+    encoder = torch.load(kl_path, map_location="cpu")
+    if use_fp16:
+        encoder = encoder.half()
+    encoder.eval()
+    encoder.to(device)
+    set_requires_grad(encoder, clip_guidance)
+    return encoder
 
 
 # bert-text
-def load_bert(bert_path: Path = Path("bert.pt"), device: str = "cuda"):
+def load_bert(bert_path: Path = Path("bert.pt"), device: str = "cuda", use_fp16: bool = False):
     """
     Load BERT from a checkpoint.
     """
     bert = BERTEmbedder(1280, 32)
     sd = torch.load(bert_path, map_location="cpu")
     bert.load_state_dict(sd)
+    if use_fp16:
+        bert = bert.half()
     bert.to(device)
-    bert.half().eval()  # TODO
+    bert.eval()  # TODO
     set_requires_grad(bert, False)
     return bert
 
@@ -247,12 +249,17 @@ def _transform(n_px):
 
 
 # clip
-def load_clip_model(device, visual_path="visual.onnx", textual_path="textual.onnx"):
+def load_clip_model(device, visual_path=None, textual_path=None):
     """
     Loads an ONNX-runtime compatible checkpoint for CLIP.
     """
     onnx_model = clip_onnx(None)
-    onnx_model.load_onnx(visual_path, textual_path, logit_scale=100.0000)
+    if visual_path is not None and textual_path is not None:
+        onnx_model.load_onnx(visual_path=visual_path, textual_path=textual_path, logit_scale=100.0000)
+    elif visual_path is not None:
+        onnx_model.load_onnx(visual_path=visual_path)
+    elif textual_path is not None:
+        onnx_model.load_onnx(textual_path=textual_path)
     provider = "CUDAExecutionProvider" if device == "cuda" else "CPUExecutionProvider"
     onnx_model.start_sessions(providers=[provider])
     return onnx_model, _transform(224)
@@ -288,28 +295,68 @@ def clip_encode_cfg(clip_model, text, negative, batch_size, device):
     return text_emb_clip_blank, text_emb_clip, text_emb_norm
 
 
-def prepare_edit(ldm, edit, batch_size, width, height, device):
+def prepare_edit(ldm, edit, width=256, height=256, edit_y=0, edit_x=0, device="cuda", use_fp16=True):
     """
     Given an `edit` image path, embed it and return the embedding. `edit` may be an image or a `.npy` file.
     """
-    if edit.endswith(".npy"):
-        with open(edit, "rb") as f:
-            input_image = np.load(f)
-            input_image = torch.from_numpy(input_image).unsqueeze(0).to(device)
+    if edit.endswith('.npy'):
+        with open(edit, 'rb') as f:
+            im = np.load(f)
+            im = torch.from_numpy(im).unsqueeze(0).to(device)
+
+            input_image = torch.zeros(1, 4, height//8, width//8, device=device)
+
+            y = edit_y//8
+            x = edit_x//8
+
+            ycrop = y + im.shape[2] - input_image.shape[2]
+            xcrop = x + im.shape[3] - input_image.shape[3]
+
+            ycrop = ycrop if ycrop > 0 else 0
+            xcrop = xcrop if xcrop > 0 else 0
+
+            input_image[0,:,y if y >=0 else 0:y+im.shape[2],x if x >=0 else 0:x+im.shape[3]] = im[:,:,0 if y > 0 else -y:im.shape[2]-ycrop,0 if x > 0 else -x:im.shape[3]-xcrop]
+            if use_fp16:
+                input_image = input_image.half()
+
             input_image_pil = ldm.decode(input_image)
-            input_image_pil = TF.to_pil_image(
-                input_image_pil.squeeze(0).add(1).div(2).clamp(0, 1)
-            )
+            input_image_pil = TF.to_pil_image(input_image_pil.squeeze(0).add(1).div(2).clamp(0, 1))
 
             input_image *= 0.18215
     else:
-        input_image_pil = Image.open(edit).convert("RGB")
+        input_image_pil = Image.open(edit).convert('RGB')
         input_image_pil = ImageOps.fit(input_image_pil, (width, height))
-        input_image = transforms.ToTensor()(input_image_pil).unsqueeze(0).to(device)
-        input_image = 2 * input_image - 1
-        input_image = 0.18215 * ldm.encode(input_image).sample()
-    image_embed = torch.cat(batch_size * 2 * [input_image], dim=0).float()
-    return image_embed
+
+        input_image = torch.zeros(1, 4, height//8, width//8, device=device)
+
+        im = transforms.ToTensor()(input_image_pil).unsqueeze(0).to(device)
+        im = 2*im-1
+        if use_fp16:
+            im = im.half()
+        im = ldm.encode(im).sample()
+
+        y = edit_y//8
+        x = edit_x//8
+
+        input_image = torch.zeros(1, 4, height//8, width//8, device=device)
+
+        ycrop = y + im.shape[2] - input_image.shape[2]
+        xcrop = x + im.shape[3] - input_image.shape[3]
+
+        ycrop = ycrop if ycrop > 0 else 0
+        xcrop = xcrop if xcrop > 0 else 0
+
+        input_image[0,:,y if y >=0 else 0:y+im.shape[2],x if x >=0 else 0:x+im.shape[3]] = im[:,:,0 if y > 0 else -y:im.shape[2]-ycrop,0 if x > 0 else -x:im.shape[3]-xcrop]
+
+        if use_fp16:
+            input_image = input_image.half()
+
+        input_image_pil = ldm.decode(input_image)
+        input_image_pil = TF.to_pil_image(input_image_pil.squeeze(0).add(1).div(2).clamp(0, 1))
+
+        input_image *= 0.18215
+    return input_image
+        
 
 
 def create_cfg_fn(model, guidance_scale):

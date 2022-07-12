@@ -4,28 +4,58 @@ This repo is modified from [glid-3-xl](https://github.com/jack000/glid-3-xl).  A
 
 <a href="https://replicate.com/laion-ai/ongo" target="_blank"><img src="https://img.shields.io/static/v1?label=run&message=ongo&color=blue"></a>
 
-<img src="/assets/ongo-painting-of-a-farm-with-flowers.png" width="256"></img>
+<img src="/assets/ongo-painting-of-a-farm-with-flowers.png" width="512"></img>
 
 <a href="https://replicate.com/laion-ai/erlich" target="_blank"><img src="https://img.shields.io/static/v1?label=run&message=erlich&color=orange"></a>
 
-<img src="/assets/colorful-glowing-low-poly-logo-of-a-lion.png" width="256"></img>
+<img src="/assets/colorful-glowing-low-poly-logo-of-a-lion.png" width="512"></img>
 
+<a href="https://replicate.com/laion-ai/puck" target="_blank"><img src="https://img.shields.io/static/v1?label=run&message=puck&color=red"></a>
 
-## Prerequisites
+<img src="/assets/puck-super-mario-world.png" width="512"></img>
+
+## Quick start (docker required)
+
+- Install [docker](https://docs.docker.com/get-docker/)
+- Install [cog](https://github.com/replicate/cog/)
+
+The following command will download all weights and run a prediction with your inputs inside a proper docker container.
+
+```sh
+cog predict r8.im/laion-ai/erlich \
+  -i prompt="an armchair in the form of an avocado" \
+  -i negative="" \
+  -i init_image=@path/to/image \
+  -i mask=@path/to/mask \
+  -i guidance_scale=5.0 \
+  -i steps=100 \
+  -i batch_size=4 \
+  -i width=256 \
+  -i height=256 \
+  -i init_skip_fraction=0.0 \
+  -i aesthetic_rating=9 \
+  -i aesthetic_weight=0.5 \
+  -i seed=-1 \
+  -i intermediate_outputs=False
+```
+
+Valid remote image URL's are:
+
+- `r8.im/laion-ai/erlich`
+- `r8.im/laion-ai/ongo`
+- `r8.im/laion-ai/puck`
+
+## Setup
+
+### Prerequisites
 
 Please ensure the following dependencies are installed prior to building this repo:
 
-- software-properties-common
 - build-essential
 - libopenmpi-dev
 - liblzma-dev
-- libnss3-dev
 - zlib1g-dev
-- libgdbm-dev
-- libncurses5-dev
-- libssl-dev
-- libffi-dev
-- libbz2-dev
+
 
 ### Pytorch
 
@@ -61,7 +91,7 @@ You can now install this repo by running `pip install -e .` in the project direc
 
 ## CLIP ViT-L/14 - ONNX
 ```sh
-wget -O textual.onnx 'https://clip-as-service.s3.us-east-2.amazonaws.com/models/onnx/ViT-L/14/textual.onnx'
+wget -O textual.onnx 'https://clip-as-service.s3.us-east-2.amazonaws.com/models/onnx/ViT-L-14/textual.onnx'
 wget -O visual.onnx 'https://clip-as-service.s3.us-east-2.amazonaws.com/models/onnx/ViT-L-14/visual.onnx'
 ```
 
@@ -123,41 +153,74 @@ wget https://huggingface.co/laion/ongo/resolve/main/ongo.pt
 
 > ["Ongo Gablogian, the art collector. Charmed, I'm sure."](https://www.youtube.com/watch?v=CuMO5q1Syek)
 
+#### LAION - `puck.pt`
+
+`puck` has been trained on pixel art. While the underlying kl-f8 encoder seems to struggle somewhat with pixel art, results are still interesting.
+
+```sh
+wget https://huggingface.co/laion/puck/resolve/main/puck.pt
+```
+
 ## Generating images
+
+You can run prediction via python or docker. Currently the docker method is best supported.
+
+### Docker/cog
+
+If you have access to a linux machine (or WSL2.0 on Windows 11) with docker installed, you can very easily run models by installing `cog`:
+
+```sh
+sudo curl -o /usr/local/bin/cog -L https://github.com/replicate/cog/releases/latest/download/cog_`uname -s`_`uname -m`
+sudo chmod +x /usr/local/bin/cog
+```
+
+Modify the `MODEL_PATH` in `cog_sample.py`:
+
+```python
+MODEL_PATH = "erlich.pt"  # Can be erlich, ongo, puck, etc.
+```
+
+Now you can run predictions via docker container using:
+
+```sh
+cog predict -i prompt="a logo of a fox made of fire"
+```
+
+Output will be returned as a base64 string at the end of generation and is also saved locally at `current_{batch_idx}.png`
+
+
+### Flask API
+
+If you'd like to stand up your own ldm-finetune Flask API, you can run:
+
+```sh
+cog build -t my_ldm_image
+docker run -d -p 5000:5000 --gpus all my_ldm_image
+```
+
+Predictions can then be accessed via HTTP:
+
+```sh
+curl http://localhost:5000/predictions -X POST \
+    -H 'Content-Type: application/json' \
+    -d '{"input": {"prompt": "a logo of a fox made of fire"}}'
+```
+
+The output from the API will be a list of base64 strings representing your generations.
+
+### Python
+
+You can also use the standalone python scripts from `glid-3-xl`.
 
 ```bash
 # fast PLMS sampling
 (venv) $ python sample.py --model_path erlich.pt --batch_size 6 --num_batches 6 --text "a cyberpunk girl with a scifi neuralink device on her head"
 
-# classifier free guidance + CLIP guidance (better adherence to prompt, much slower)
-(venv) $ python sample.py --clip_guidance --model_path finetune.pt --batch_size 1 --num_batches 12 --text "a cyberpunk girl with a scifi neuralink device on her head | trending on artstation"
-
 # sample with an init image
 (venv) $ python sample.py --init_image picture.jpg --skip_timesteps 10 --model_path ongo.pt --batch_size 6 --num_batches 6 --text "a cyberpunk girl with a scifi neuralink device on her head"
 ```
 
-## Editing images
-
-aka human guided diffusion. You can use inpainting to generate more complex prompts by progressively editing the image
-
-note: you can use > 256px but the model only sees 256x256 at a time, so ensure the inpaint area is smaller than that
-
-```bash
-# install PyQt5 if you want to use a gui, otherwise supply a mask file
-(venv) $ pip install PyQt5
-
-# this will pop up a window, use your mouse to paint
-# use the generated npy files instead of png for best quality
-(venv) $ python sample.py --model_path inpaint.pt --edit output_npy/00000.npy --batch_size 6 --num_batches 6 --text "your prompt"
-
-# after painting, the mask is saved for re-use
-(venv) $ python sample.py --mask mask.png --model_path inpaint.pt --edit output_npy/00000.npy --batch_size 6 --num_batches 6 --text "your prompt"
-
-# additional arguments for uncropping
-(venv) $ python sample.py --edit_x 64 --edit_y 64 --edit_width 128 --edit_height 128 --model_path inpaint.pt --edit output_npy/00000.npy --batch_size 6 --num_batches 6 --text "your prompt"
-```
-
-## Autoedit 
+### Autoedit
 
 > Autoedit uses the inpaint model to give the ldm an image prompting function (that works differently from --init_image)
 > It continuously edits random parts of the image to maximize clip score for the text prompt
@@ -173,18 +236,17 @@ CUDA_VISIBLE_DEVICES=5 python autoedit.py \
     --aesthetic_rating 9 --aesthetic_weight 0.5 --wandb_name autoedit_pixelart
 ```
 
-
 ## Training/Fine tuning
 
 See the script below for an example of finetuning your own model from one of the available chekcpoints. 
 
-
 Finetuning Tips/Tricks
-* NVIDIA GPU required. You will need an A100 or better to use a batch size of 64. Using less may present stability issues.
-* Monitor the `grad_norm` in the output log.  If it ever goes above 1.0 the checkpoint may be ruined due to exploding gradients. 
-    * to fix, try reducing the learning rate, decreasing the batch size.
-    * Train in 32-bit
-    * Resume with saved optimizer state when possible.
+
+- NVIDIA GPU required. You will need an A100 or better to use a batch size of 64. Using less may present stability issues.
+- Monitor the `grad_norm` in the output log.  If it ever goes above 1.0 the checkpoint may be ruined due to exploding gradients.
+  - to fix, try reducing the learning rate, decreasing the batch size.
+    - Train in 32-bit
+    - Resume with saved optimizer state when possible.
 
 ```bash
 #!/bin/bash
