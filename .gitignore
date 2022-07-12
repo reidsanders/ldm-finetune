@@ -21,3 +21,5 @@ textual.onnx
 visual.onnx
 *.sh
 .cog/
+saved/
+autoedit_outputs*
