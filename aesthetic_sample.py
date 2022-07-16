@@ -264,6 +264,14 @@ parser.add_argument(
     help="weight to put on negative class guidance",
 )
 
+parser.add_argument(
+    "--output_dir",
+    type=str,
+    required=False,
+    default="outputs/",
+    help="Directory to save outputs",
+)
+
 
 args = parser.parse_args()
 
@@ -736,7 +744,8 @@ def do_run(text, prefix, aesthetic_rating=9, aesthetic_weight=0.5, positive_clas
     else:
         sample_fn = diffusion.plms_sample_loop_progressive
 
-    output_folder = f"outputs/outputs_{model_name}__{args.steps}_{args.guidance_scale}"
+    output_folder = os.path.join(args.output_dir, f"outputs_{model_name}__{args.steps}_{args.guidance_scale}")
+    print(f"output folder: {output_folder}")
     os.makedirs(output_folder, exist_ok=True)
     os.makedirs(output_folder + "_npy", exist_ok=True)
 
