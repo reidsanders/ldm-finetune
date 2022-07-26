@@ -510,8 +510,8 @@ def main(args):
             sample_fn = diffusion.plms_sample_loop_progressive
 
         def save_sample(i, sample, output_folder, clip_score=False):
-            outpath = f"{output_folder}_{random.randint(1,1e9):08}/"
-            outpath_npy = f"{output_folder}_{random.randint(1,1e9):08}_npy/"
+            outpath = output_folder
+            outpath_npy = f"{output_folder}_npy/"
 
             os.makedirs(outpath, exist_ok=True)
             os.makedirs(outpath_npy, exist_ok=True)
@@ -548,6 +548,7 @@ def main(args):
         output_folder = os.path.join(args.output_dir, f"outputs_{args.steps}_{args.guidance_scale}_{clean_prompt}")
         os.makedirs(output_folder, exist_ok=True)
         for image in find_image_files(args.init_image):
+            output_subfolder = os.path.join(output_folder, Path(image).stem[-30:] + "_" + str(random.randint(1,9e9)))
             init = Image.open(image).convert('RGB')
             init = init.resize((int(args.width),  int(args.height)), Image.LANCZOS)
             init = TF.to_tensor(init).to(device).unsqueeze(0).clamp(0, 1)
@@ -572,9 +573,9 @@ def main(args):
                 for j, sample in enumerate(samples):
                     cur_t -= 1
                     if j % 5 == 0 and j != diffusion.num_timesteps - 1:
-                        save_sample(i, sample, output_folder)
+                        save_sample(i, sample, output_subfolder)
 
-                save_sample(i, sample, output_folder, clip_score=args.clip_score)
+                save_sample(i, sample, output_subfolder, clip_score=args.clip_score)
 
     gc.collect()
     do_run()
