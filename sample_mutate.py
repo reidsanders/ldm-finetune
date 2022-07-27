@@ -124,6 +124,9 @@ parser.add_argument('--ddim', dest='ddim', action='store_true')
 # turn on to use 50 step ddim
 parser.add_argument('--ddpm', dest='ddpm', action='store_true')
 
+# skip
+parser.add_argument('--skip_count', type=int, default=0, required=False)
+
 parser.add_argument(
     "--output_dir",
     type=str,
@@ -511,18 +514,18 @@ def main(args):
 
         def save_sample(i, sample, output_folder, clip_score=False):
             outpath = output_folder
-            outpath_npy = f"{output_folder}_npy/"
+            # outpath_npy = f"{output_folder}_npy/"
 
             os.makedirs(outpath, exist_ok=True)
-            os.makedirs(outpath_npy, exist_ok=True)
+            # os.makedirs(outpath_npy, exist_ok=True)
             for k, image in enumerate(sample['pred_xstart'][:args.batch_size]):
                 image /= 0.18215
                 im = image.unsqueeze(0)
                 out = ldm.decode(im)
 
-                npy_filename = os.path.join(outpath_npy, f'{args.prefix}{i * args.batch_size + k:05}.npy')
-                with open(npy_filename, 'wb') as outfile:
-                    np.save(outfile, image.detach().cpu().numpy())
+                # npy_filename = os.path.join(outpath_npy, f'{args.prefix}{i * args.batch_size + k:05}.npy')
+                # with open(npy_filename, 'wb') as outfile:
+                #     np.save(outfile, image.detach().cpu().numpy())
 
                 out = TF.to_pil_image(out.squeeze(0).add(1).div(2).clamp(0, 1))
 
@@ -541,19 +544,25 @@ def main(args):
                     final_filename = f'output/{args.prefix}_{similarity.item():0.3f}_{i * args.batch_size + k:05}.png'
                     os.rename(filename, final_filename)
 
-                    npy_final = f'output_npy/{args.prefix}_{similarity.item():0.3f}_{i * args.batch_size + k:05}.npy'
-                    os.rename(npy_filename, npy_final)
+                    # npy_final = f'output_npy/{args.prefix}_{similarity.item():0.3f}_{i * args.batch_size + k:05}.npy'
+                    # os.rename(npy_filename, npy_final)
 
         clean_prompt = args.text.replace(" ", "_").replace(".", "")[:220]
         output_folder = os.path.join(args.output_dir, f"outputs_{args.steps}_{args.guidance_scale}_{clean_prompt}")
         os.makedirs(output_folder, exist_ok=True)
-        for image in find_image_files(args.init_image):
+        import time
+        for i,image in enumerate(find_image_files(args.init_image)):
+            if i < args.skip_count:
+                # HACK to allow resume without re-running the entire dataset
+                continue
+            starttime = time.time()
             output_subfolder = os.path.join(output_folder, Path(image).stem[-30:] + "_" + str(random.randint(1,9e9)))
             init = Image.open(image).convert('RGB')
             init = init.resize((int(args.width),  int(args.height)), Image.LANCZOS)
             init = TF.to_tensor(init).to(device).unsqueeze(0).clamp(0, 1)
             h = ldm.encode(init * 2 - 1).sample() * 0.18215
             init = torch.cat(args.batch_size*2*[h], dim=0)
+            print(f"Loading {Path(image).stem} took {time.time() - starttime} seconds")
 
             for i in range(args.num_batches):
                 cur_t = diffusion.num_timesteps - 1
