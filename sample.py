@@ -19,6 +19,8 @@ from torch.nn import functional as F
 from torchvision import transforms
 from torchvision.transforms import functional as TF
 from tqdm.notebook import tqdm
+import random
+from pathlib import Path
 
 from encoders.modules import BERTEmbedder
 from guided_diffusion.script_util import (create_model_and_diffusion,
@@ -111,6 +113,14 @@ parser.add_argument('--ddim', dest='ddim', action='store_true')
 parser.add_argument('--ddpm', dest='ddpm', action='store_true')
 
 args = parser.parse_args()
+
+model_name = (
+    Path(args.model_path).stem.replace(".", "_")
+    + "_"
+    + str(args.steps)
+    + "_"
+    + str(random.randint(1, 100000))
+)
 
 if args.edit and not args.mask:
     import PyQt5.QtGui as QtGui
@@ -312,6 +322,8 @@ normalize = transforms.Normalize(mean=[0.48145466, 0.4578275, 0.40821073], std=[
 
 
 def do_run():
+    prompt = args.text.replace(" ", "_").replace(".", "")[:220]
+
     if args.seed >= 0:
         torch.manual_seed(args.seed)
 
@@ -486,21 +498,18 @@ def do_run():
     else:
         sample_fn = diffusion.plms_sample_loop_progressive
 
+    output_folder = os.path.join(args.output_dir, f"outputs_{model_name}__{args.steps}_{args.guidance_scale}_{prompt}")
+    print(f"output folder: {output_folder}")
+    os.makedirs(output_folder, exist_ok=True)
     def save_sample(i, sample, clip_score=False):
-        os.makedirs(f'output_npy', exist_ok=True)
         os.makedirs(f'output', exist_ok=True)
         for k, image in enumerate(sample['pred_xstart'][:args.batch_size]):
             image /= 0.18215
             im = image.unsqueeze(0)
             out = ldm.decode(im)
-
-            npy_filename = f'output_npy/{args.prefix}{i * args.batch_size + k:05}.npy'
-            with open(npy_filename, 'wb') as outfile:
-                np.save(outfile, image.detach().cpu().numpy())
-
+            Path(output_folder).mkdir(parents=True, exist_ok=True)
             out = TF.to_pil_image(out.squeeze(0).add(1).div(2).clamp(0, 1))
-
-            filename = f'output/{args.prefix}{i * args.batch_size + k:05}.png'
+            filename =  Path(output_folder) / f"{args.prefix}_{prompt}_{i * args.batch_size + k:05}.png"
             out.save(filename)
 
             if clip_score:
@@ -512,11 +521,8 @@ def do_run():
                 similarity = torch.nn.functional.cosine_similarity(
                     image_emb_norm, text_emb_norm, dim=-1)
 
-                final_filename = f'output/{args.prefix}_{similarity.item():0.3f}_{i * args.batch_size + k:05}.png'
+                final_filename = Path(output_folder) / f'{args.prefix}_{prompt}_{similarity.item():0.3f}_{i * args.batch_size + k:05}.png'
                 os.rename(filename, final_filename)
-
-                npy_final = f'output_npy/{args.prefix}_{similarity.item():0.3f}_{i * args.batch_size + k:05}.npy'
-                os.rename(npy_filename, npy_final)
 
     if args.init_image:
         init = Image.open(args.init_image).convert('RGB')
