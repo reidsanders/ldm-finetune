@@ -135,6 +135,8 @@ parser.add_argument(
     help="Directory to save outputs",
 )
 
+parser.add_argument('--save_nsteps', type=int, default=5, required=False,
+                    help='Save partial every')
 
 def main(args):
 
@@ -581,7 +583,7 @@ def main(args):
 
                 for j, sample in enumerate(samples):
                     cur_t -= 1
-                    if j % 5 == 0 and j != diffusion.num_timesteps - 1:
+                    if j % args.save_nsteps == 0 and j != 0 and j != diffusion.num_timesteps - 1:
                         save_sample(i, sample, output_subfolder)
 
                 save_sample(i, sample, output_subfolder, clip_score=args.clip_score)
