@@ -106,11 +106,22 @@ parser.add_argument('--clip_guidance_scale', type=float, default=150, required=F
 parser.add_argument('--cutn', type=int, default=16, required=False,
                     help='Number of cuts')
 
+parser.add_argument('--save_nsteps', type=int, default=5, required=False,
+                    help='Save partial every')
+
 # turn on to use 50 step ddim
 parser.add_argument('--ddim', dest='ddim', action='store_true')
 
 # turn on to use 50 step ddim
 parser.add_argument('--ddpm', dest='ddpm', action='store_true')
+
+parser.add_argument(
+    "--output_dir",
+    type=str,
+    required=False,
+    default="outputs/",
+    help="Directory to save outputs",
+)
 
 args = parser.parse_args()
 
@@ -501,6 +512,7 @@ def do_run():
     output_folder = os.path.join(args.output_dir, f"outputs_{model_name}__{args.steps}_{args.guidance_scale}_{prompt}")
     print(f"output folder: {output_folder}")
     os.makedirs(output_folder, exist_ok=True)
+
     def save_sample(i, sample, clip_score=False):
         os.makedirs(f'output', exist_ok=True)
         for k, image in enumerate(sample['pred_xstart'][:args.batch_size]):
@@ -550,7 +562,7 @@ def do_run():
 
         for j, sample in enumerate(samples):
             cur_t -= 1
-            if j % 5 == 0 and j != diffusion.num_timesteps - 1:
+            if j % args.save_nsteps == 0 and j != 0 and j != diffusion.num_timesteps - 1:
                 save_sample(i, sample)
 
         save_sample(i, sample, args.clip_score)
