@@ -21,6 +21,7 @@ from torchvision.transforms import functional as TF
 from tqdm.notebook import tqdm
 import random
 from pathlib import Path
+import json
 
 from encoders.modules import BERTEmbedder
 from guided_diffusion.script_util import (create_model_and_diffusion,
@@ -121,6 +122,13 @@ parser.add_argument(
     required=False,
     default="outputs/",
     help="Directory to save outputs",
+)
+
+parser.add_argument(
+    "--prompt_file",
+    type=str,
+    default="",
+    help="json file with list of prompts to run.",
 )
 
 args = parser.parse_args()
@@ -332,18 +340,17 @@ normalize = transforms.Normalize(mean=[0.48145466, 0.4578275, 0.40821073], std=[
                                  0.26862954, 0.26130258, 0.27577711])
 
 
-def do_run():
-    prompt = args.text.replace(" ", "_").replace(".", "")[:220]
-
+# def do_run():
+def do_run(text, prefix):
     if args.seed >= 0:
         torch.manual_seed(args.seed)
 
     # bert context
-    text_emb = bert.encode([args.text]*args.batch_size).to(device).float()
+    text_emb = bert.encode([text]*args.batch_size).to(device).float()
     text_blank = bert.encode(
         [args.negative]*args.batch_size).to(device).float()
 
-    text = clip.tokenize([args.text]*args.batch_size, truncate=True).to(device)
+    text = clip.tokenize([text]*args.batch_size, truncate=True).to(device)
     text_clip_blank = clip.tokenize(
         [args.negative]*args.batch_size, truncate=True).to(device)
 
@@ -509,19 +516,18 @@ def do_run():
     else:
         sample_fn = diffusion.plms_sample_loop_progressive
 
-    output_folder = os.path.join(args.output_dir, f"outputs_{model_name}__{args.steps}_{args.guidance_scale}_{prompt}")
+    output_folder = os.path.join(args.output_dir, f"outputs_{model_name}__{args.steps}_{args.guidance_scale}_{prefix}")
     print(f"output folder: {output_folder}")
     os.makedirs(output_folder, exist_ok=True)
 
     def save_sample(i, sample, clip_score=False):
-        os.makedirs(f'output', exist_ok=True)
         for k, image in enumerate(sample['pred_xstart'][:args.batch_size]):
             image /= 0.18215
             im = image.unsqueeze(0)
             out = ldm.decode(im)
             Path(output_folder).mkdir(parents=True, exist_ok=True)
             out = TF.to_pil_image(out.squeeze(0).add(1).div(2).clamp(0, 1))
-            filename =  Path(output_folder) / f"{args.prefix}_{prompt}_{i * args.batch_size + k:05}.png"
+            filename =  Path(output_folder) / f"{args.prefix}_{prefix}_{i * args.batch_size + k:05}.png"
             out.save(filename)
 
             if clip_score:
@@ -533,7 +539,7 @@ def do_run():
                 similarity = torch.nn.functional.cosine_similarity(
                     image_emb_norm, text_emb_norm, dim=-1)
 
-                final_filename = Path(output_folder) / f'{args.prefix}_{prompt}_{similarity.item():0.3f}_{i * args.batch_size + k:05}.png'
+                final_filename = Path(output_folder) / f'{args.prefix}_{prefix}_{similarity.item():0.3f}_{i * args.batch_size + k:05}.png'
                 os.rename(filename, final_filename)
 
     if args.init_image:
@@ -568,5 +574,24 @@ def do_run():
         save_sample(i, sample, args.clip_score)
 
 
-gc.collect()
-do_run()
+if args.text:
+    prefix = args.text.replace(" ", "_").replace(".", "")[:220]
+    do_run(
+        args.text,
+        prefix,
+    )
+    gc.collect()
+
+elif args.prompt_file:
+    prompts = json.load(open(args.prompt_file))
+    try:
+        for prompt in prompts:
+            prefix = prompt.replace(" ", "_").replace(".", "")[:220]
+            print(f"Starting run for: {prompt}")
+            do_run(
+                prompt,
+                prefix,
+            )
+            gc.collect()
+    except KeyboardInterrupt:
+        print(f"Canceled, uploading partial results.")
