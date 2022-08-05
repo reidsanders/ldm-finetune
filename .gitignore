@@ -26,3 +26,4 @@ visual.onnx
 saved/
 autoedit_outputs*
 mutated_**/
+prompts/
